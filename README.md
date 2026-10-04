@@ -47,9 +47,31 @@ Installers are written to `src-tauri/target/release/bundle/`. Build each platfor
 
 The [release workflow](.github/workflows/release.yml) follows [Tauri's GitHub Actions guidance](https://v2.tauri.app/distribute/pipelines/github/). Push the repository to GitHub, then run the workflow manually or push a version tag:
 
-1. Update the matching versions in `package.json`, `src-tauri/Cargo.toml`, and `src-tauri/tauri.conf.json`; refresh both lockfiles.
-2. Commit the changes and push a tag such as `v0.1.0`.
-3. Actions builds Apple Silicon and Intel macOS `.dmg`/app bundles and Windows x64 `.exe` (NSIS) / `.msi` installers, attaching them to a **draft GitHub release**.
-4. Review the artifacts and publish the draft release in GitHub.
+### Tag a release with Git
+
+Run these commands from the project root on the branch you want to release. Make sure `origin` points to your GitHub repository and commit the app changes you want included in the release first.
+
+For example, to release **0.1.1**, set `version` to `0.1.1` in `package.json`, `src-tauri/Cargo.toml` (the `[package]` version), and `src-tauri/tauri.conf.json`. Use the same version in all three files and in the tag below. Then refresh the lockfiles and verify the build:
+
+```sh
+npm install --package-lock-only --ignore-scripts
+cargo check --manifest-path src-tauri/Cargo.toml
+npm run build
+cargo test --manifest-path src-tauri/Cargo.toml --locked
+```
+
+Commit the version changes, create an annotated tag on that commit, and push both the branch and the tag:
+
+```sh
+git add package.json package-lock.json src-tauri/Cargo.toml src-tauri/Cargo.lock src-tauri/tauri.conf.json
+git commit -m "Release v0.1.1"
+git tag -a v0.1.1 -m "Task Dashboard v0.1.1"
+git push origin HEAD
+git push origin v0.1.1
+```
+
+**Pushing the tag triggers the release workflow.** Creating a local tag or pushing only the branch does not trigger it. The workflow matches tags starting with `v`; use a new tag for each release, such as `v0.1.2` for the next version.
+
+In GitHub, open **Actions → Desktop installers** to follow the build. Actions builds Apple Silicon and Intel macOS `.dmg`/app bundles and Windows x64 `.exe` (NSIS) / `.msi` installers, attaching them to a **draft GitHub release**. When all three build jobs succeed, open **Releases**, review the draft and its installers, and choose **Publish release** to make it available for download.
 
 The workflow needs GitHub Actions enabled and its built-in token allowed to write repository contents. No signing secrets are needed for this initial pipeline. macOS uses ad-hoc signing, without notarization; Windows installers are unsigned, so operating systems may show trust prompts. For public distribution, configure [macOS signing and notarization](https://v2.tauri.app/distribute/sign/macos/) and [Windows signing](https://v2.tauri.app/distribute/sign/windows/) with your certificates and GitHub secrets.
