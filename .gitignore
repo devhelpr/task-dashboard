@@ -1,0 +1,56 @@
+# JavaScript dependencies and build output
+node_modules/
+/dist/
+/dist-ssr/
+.vite/
+*.tsbuildinfo
+
+# Rust / Tauri build output and generated capability schemas
+/target/
+/src-tauri/target/
+/src-tauri/gen/schemas/
+
+# Test reports and coverage
+/test-results/
+/playwright-report/
+/playwright/.cache/
+/coverage/
+
+# Logs and local caches
+logs/
+*.log
+.npm/
+.cache/
+
+# Local environment configuration (keep templates in version control)
+.env
+.env.*
+!.env.example
+!.env.sample
+*.local
+
+# Private signing credentials
+*.p12
+*.pfx
+*.key
+
+# Editor files (allow shared VS Code project configuration)
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+.idea/
+*.swp
+*.swo
+*~
+*.suo
+*.user
+
+# macOS and Windows filesystem metadata
+.DS_Store
+._*
+Thumbs.db
+Desktop.ini
+
+# Keep package-lock.json, Cargo.lock, app icons, and source configuration tracked.
