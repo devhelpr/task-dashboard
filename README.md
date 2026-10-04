@@ -72,6 +72,6 @@ git push origin v0.1.1
 
 **Pushing the tag triggers the release workflow.** Creating a local tag or pushing only the branch does not trigger it. The workflow matches tags starting with `v`; use a new tag for each release, such as `v0.1.2` for the next version.
 
-In GitHub, open **Actions → Desktop installers** to follow the build. Actions builds Apple Silicon and Intel macOS `.dmg`/app bundles and Windows x64 `.exe` (NSIS) / `.msi` installers, attaching them to a **draft GitHub release**. When all three build jobs succeed, open **Releases**, review the draft and its installers, and choose **Publish release** to make it available for download.
+In GitHub, open **Actions → Desktop installers** to follow the build. Actions builds an Apple Silicon macOS `.dmg` and Windows x64 `.exe` (NSIS) / `.msi` installers, attaching them to a **draft GitHub release**. When both build jobs succeed, open **Releases**, review the draft and its installers, and choose **Publish release** to make it available for download.
 
 The workflow needs GitHub Actions enabled and its built-in token allowed to write repository contents. No signing secrets are needed for this initial pipeline. macOS uses ad-hoc signing, without notarization; Windows installers are unsigned, so operating systems may show trust prompts. For public distribution, configure [macOS signing and notarization](https://v2.tauri.app/distribute/sign/macos/) and [Windows signing](https://v2.tauri.app/distribute/sign/windows/) with your certificates and GitHub secrets.
