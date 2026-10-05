@@ -13,7 +13,7 @@ npm run tauri dev
 
 The app was bootstrapped with the official [Tauri v2 starter](https://v2.tauri.app/start/) using `npm create tauri-app@latest . -- --template react-ts --manager npm --identifier com.hedwig.taskdashboard --yes`.
 
-`npm run test:e2e` runs browser smoke tests using installed Google Chrome and a dedicated test server on port 1438.
+`npm run test:e2e` runs UI and settings regression tests using installed Google Chrome and a dedicated test server on port 1438. These cover sequential edits, stale tabs, preserving other buttons' settings across saves and reloads, and delayed desktop startup loads with mocked Tauri commands. Rust tests exercise the actual settings files and change payloads.
 
 `npm run dev` provides a UI preview with separate browser-local settings. Browser launching requires the desktop app.
 
@@ -24,6 +24,8 @@ Click a dashboard button to open its webmail address. In **Settings**, choose **
 Chrome, Edge, and Firefox must be installed; Safari is available on macOS. System default uses your OS browser preference. macOS locates named browsers through Launch Services; Windows uses registered App Paths for the current user and machine, including both registry views. Missing browsers produce an error. The app uses your existing browser session and never stores email credentials.
 
 Settings are written atomically to a stable per-user directory, separate from the installed application and Tauri’s bundle-ID app data: `~/Library/Application Support/com.hedwig.taskdashboard.settings/settings.json` on macOS, and `%APPDATA%\com.hedwig.taskdashboard.settings\settings.json` on Windows. Replacing the macOS app or reinstalling/upgrading the Windows app under the same OS user preserves these settings, including names, browser choices, URLs, and button order. The Windows uninstaller’s optional bundle-data cleanup does not target this directory. Failed saves leave the previous dashboard intact; unreadable or invalid settings report an error instead of overwriting the file. No cloud account is required.
+
+Each settings action applies to the latest saved list by button ID. Editing one button preserves the other buttons' names, destinations, browsers, and order, even when the editor's window has an older copy of the list. Saving an editor for a button that has since been deleted reports an error instead of restoring it.
 
 On first launch after upgrading from the initial version, existing `com.hedwig.taskdashboard/settings.json` settings are copied automatically to the new directory. The old file is retained for rollback; an existing new settings file always takes precedence. Install the first upgrade over the existing app and launch it once before removing any legacy app data. Settings already deleted manually or by the old uninstaller cannot be recovered automatically.
 

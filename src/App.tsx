@@ -4,7 +4,7 @@ import {
   getPlatform,
   launchButton,
   loadSettings,
-  saveSettings,
+  changeSettings,
 } from "./api";
 import {
   browsers,
@@ -12,6 +12,7 @@ import {
   validateButton,
   type Browser,
   type Settings,
+  type SettingsChange,
   type TaskButton,
 } from "./model";
 import "./App.css";
@@ -48,12 +49,19 @@ function App() {
   const nameInput = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
+    let active = true;
     Promise.all([loadSettings(), getPlatform()])
       .then(([data, os]) => {
+        if (!active) return;
         setSettings(data);
         setPlatform(os);
       })
-      .catch((e) => setError(String(e)));
+      .catch((e) => {
+        if (active) setError(String(e));
+      });
+    return () => {
+      active = false;
+    };
   }, []);
   useEffect(() => {
     if (editing) {
@@ -66,11 +74,11 @@ function App() {
     else deleteDialog.current?.close();
   }, [deleting]);
 
-  async function persist(next: Settings): Promise<boolean> {
+  async function persist(change: SettingsChange): Promise<boolean> {
     setBusy(true);
     setError("");
     try {
-      await saveSettings(next);
+      const next = await changeSettings(change);
       setSettings(next);
       return true;
     } catch (e) {
@@ -112,13 +120,7 @@ function App() {
       return;
     }
     const exists = settings.buttons.some((b) => b.id === button.id);
-    const next = {
-      ...settings,
-      buttons: exists
-        ? settings.buttons.map((b) => (b.id === button.id ? button : b))
-        : [...settings.buttons, button],
-    };
-    if (await persist(next)) {
+    if (await persist({ type: exists ? "update" : "add", button })) {
       setEditing(null);
       setNotice(exists ? "Button updated." : "Button added.");
     }
@@ -128,22 +130,16 @@ function App() {
       settings &&
       deleting &&
       (await persist({
-        ...settings,
-        buttons: settings.buttons.filter((b) => b.id !== deleting.id),
+        type: "delete",
+        id: deleting.id,
       }))
     ) {
       setDeleting(null);
       setNotice("Button deleted.");
     }
   }
-  async function move(index: number, direction: number) {
-    if (!settings) return;
-    const buttons = [...settings.buttons];
-    [buttons[index], buttons[index + direction]] = [
-      buttons[index + direction],
-      buttons[index],
-    ];
-    if (await persist({ ...settings, buttons }))
+  async function move(id: string, direction: "up" | "down") {
+    if (await persist({ type: "move", id, direction }))
       setNotice("Button order updated.");
   }
   async function launch(button: TaskButton) {
@@ -305,7 +301,7 @@ function App() {
                     className="icon-button"
                     aria-label={`Move ${button.name} up`}
                     disabled={busy || index === 0}
-                    onClick={() => move(index, -1)}
+                    onClick={() => move(button.id, "up")}
                   >
                     ↑
                   </button>
@@ -313,7 +309,7 @@ function App() {
                     className="icon-button"
                     aria-label={`Move ${button.name} down`}
                     disabled={busy || index === settings.buttons.length - 1}
-                    onClick={() => move(index, 1)}
+                    onClick={() => move(button.id, "down")}
                   >
                     ↓
                   </button>

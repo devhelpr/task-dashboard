@@ -31,6 +31,55 @@ struct Settings {
     buttons: Vec<TaskButton>,
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(tag = "type", rename_all = "lowercase")]
+enum SettingsChange {
+    Add { button: TaskButton },
+    Update { button: TaskButton },
+    Delete { id: String },
+    Move { id: String, direction: Direction },
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "lowercase")]
+enum Direction {
+    Up,
+    Down,
+}
+
+fn apply_settings_change(settings: &mut Settings, change: SettingsChange) -> Result<(), String> {
+    let id = match &change {
+        SettingsChange::Add { button } | SettingsChange::Update { button } => &button.id,
+        SettingsChange::Delete { id } | SettingsChange::Move { id, .. } => id,
+    };
+    let index = settings.buttons.iter().position(|button| &button.id == id);
+    if let SettingsChange::Add { button } = change {
+        if index.is_some() {
+            return Err("Button already exists.".into());
+        }
+        settings.buttons.push(button);
+    } else {
+        let index = index.ok_or("Button no longer exists.")?;
+        match change {
+            SettingsChange::Update { button } => settings.buttons[index] = button,
+            SettingsChange::Delete { .. } => {
+                settings.buttons.remove(index);
+            }
+            SettingsChange::Move { direction, .. } => {
+                let target = match direction {
+                    Direction::Up => index.checked_sub(1),
+                    Direction::Down => Some(index + 1),
+                }
+                .filter(|target| *target < settings.buttons.len())
+                .ok_or("Button cannot move further in that direction.")?;
+                settings.buttons.swap(index, target);
+            }
+            SettingsChange::Add { .. } => unreachable!(),
+        }
+    }
+    validate(settings)
+}
+
 impl Default for Settings {
     fn default() -> Self {
         Self {
@@ -146,6 +195,16 @@ fn read_settings_from(root: &std::path::Path) -> Result<Settings, String> {
 fn read_settings(app: &tauri::AppHandle) -> Result<Settings, String> {
     read_settings_from(&config_root(app)?)
 }
+fn change_settings_from(
+    root: &std::path::Path,
+    change: SettingsChange,
+) -> Result<Settings, String> {
+    let mut settings = read_settings_from(root)?;
+    apply_settings_change(&mut settings, change)?;
+    let (path, _) = settings_paths(root);
+    write_settings(&path, &settings)?;
+    Ok(settings)
+}
 #[tauri::command]
 fn load_settings(
     app: tauri::AppHandle,
@@ -155,14 +214,15 @@ fn load_settings(
     read_settings(&app)
 }
 #[tauri::command]
-fn save_settings(
+fn change_settings(
     app: tauri::AppHandle,
     lock: tauri::State<SettingsLock>,
-    settings: Settings,
-) -> Result<(), String> {
+    change: SettingsChange,
+) -> Result<Settings, String> {
     let _guard = lock.0.lock().map_err(|_| "Settings are unavailable.")?;
-    let (path, _) = settings_paths(&config_root(&app)?);
-    write_settings(&path, &settings)
+    // Keep the entire read-modify-write under the lock. A window only submits
+    // its intended action, so stale snapshots cannot reset unrelated buttons.
+    change_settings_from(&config_root(&app)?, change)
 }
 #[tauri::command]
 fn platform() -> &'static str {
@@ -260,7 +320,7 @@ pub fn run() {
         .manage(SettingsLock(Mutex::new(())))
         .invoke_handler(tauri::generate_handler![
             load_settings,
-            save_settings,
+            change_settings,
             launch_button,
             platform
         ])
@@ -327,6 +387,155 @@ mod tests {
         assert_eq!(
             serde_json::to_value(actual).unwrap(),
             serde_json::to_value(expected).unwrap()
+        );
+    }
+    fn customized_settings() -> Settings {
+        let mut settings = Settings::default();
+        for (index, button) in settings.buttons.iter_mut().enumerate() {
+            button.name = format!("Custom inbox {index}");
+            button.action = Action::Webmail {
+                browser: [Browser::Chrome, Browser::Firefox, Browser::Edge][index].clone(),
+                url: format!("https://mail{index}.example.com/inbox?folder=shared"),
+            };
+        }
+        settings
+    }
+    #[test]
+    fn editing_first_button_preserves_newer_settings_for_every_other_button() {
+        let temp = tempfile::tempdir().unwrap();
+        let (path, _) = settings_paths(temp.path());
+        let stale = customized_settings();
+        write_settings(&path, &stale).unwrap();
+        let mut expected = stale.clone();
+        expected.buttons[1].name = "Updated team inbox".into();
+        expected.buttons[1].action = Action::Webmail {
+            browser: Browser::Chrome,
+            url: "https://team.example.com/new-inbox".into(),
+        };
+        change_settings_from(
+            temp.path(),
+            SettingsChange::Update {
+                button: expected.buttons[1].clone(),
+            },
+        )
+        .unwrap();
+        // The first button's editor was opened before the other save.
+        let mut edited = stale.buttons[0].clone();
+        edited.name = "Updated work inbox".into();
+        edited.action = Action::Webmail {
+            browser: Browser::Edge,
+            url: "https://work.example.com/new-inbox".into(),
+        };
+        expected.buttons[0] = edited.clone();
+        let saved =
+            change_settings_from(temp.path(), SettingsChange::Update { button: edited }).unwrap();
+        assert_same_settings(&saved, &expected);
+        assert_same_settings(&read_settings_from(temp.path()).unwrap(), &expected);
+    }
+    #[test]
+    fn stale_editor_preserves_new_buttons_deletions_and_order() {
+        let temp = tempfile::tempdir().unwrap();
+        let (path, _) = settings_paths(temp.path());
+        let stale = customized_settings();
+        write_settings(&path, &stale).unwrap();
+        let added = TaskButton {
+            id: "new".into(),
+            name: "New shared inbox".into(),
+            action: Action::Webmail {
+                browser: Browser::Firefox,
+                url: "https://shared.example.com/".into(),
+            },
+        };
+        change_settings_from(
+            temp.path(),
+            SettingsChange::Add {
+                button: added.clone(),
+            },
+        )
+        .unwrap();
+        change_settings_from(temp.path(), SettingsChange::Delete { id: "gmail".into() }).unwrap();
+        change_settings_from(
+            temp.path(),
+            SettingsChange::Move {
+                id: "outlook".into(),
+                direction: Direction::Down,
+            },
+        )
+        .unwrap();
+        let mut edited = stale.buttons[0].clone();
+        edited.name = "Renamed work inbox".into();
+        let saved = change_settings_from(
+            temp.path(),
+            SettingsChange::Update {
+                button: edited.clone(),
+            },
+        )
+        .unwrap();
+        let expected = Settings {
+            version: 1,
+            buttons: vec![stale.buttons[2].clone(), edited, added],
+        };
+        assert_same_settings(&saved, &expected);
+        assert_same_settings(&read_settings_from(temp.path()).unwrap(), &expected);
+    }
+    #[test]
+    fn invalid_changes_leave_saved_settings_untouched() {
+        let temp = tempfile::tempdir().unwrap();
+        let (path, _) = settings_paths(temp.path());
+        let settings = customized_settings();
+        write_settings(&path, &settings).unwrap();
+        let original = fs::read(&path).unwrap();
+        let mut invalid = settings.buttons[0].clone();
+        invalid.action = Action::Webmail {
+            browser: Browser::Default,
+            url: "http://unsafe.example.com".into(),
+        };
+        let mut missing = settings.buttons[0].clone();
+        missing.id = "deleted".into();
+        for change in [
+            SettingsChange::Update { button: invalid },
+            SettingsChange::Update { button: missing },
+            SettingsChange::Add {
+                button: settings.buttons[0].clone(),
+            },
+            SettingsChange::Delete {
+                id: "deleted".into(),
+            },
+            SettingsChange::Move {
+                id: "deleted".into(),
+                direction: Direction::Up,
+            },
+            SettingsChange::Move {
+                id: "outlook".into(),
+                direction: Direction::Up,
+            },
+            SettingsChange::Move {
+                id: "hotmail".into(),
+                direction: Direction::Down,
+            },
+        ] {
+            assert!(change_settings_from(temp.path(), change).is_err());
+            assert_eq!(fs::read(&path).unwrap(), original);
+        }
+    }
+    #[test]
+    fn frontend_change_payloads_deserialize_and_apply() {
+        let temp = tempfile::tempdir().unwrap();
+        let (path, _) = settings_paths(temp.path());
+        write_settings(&path, &customized_settings()).unwrap();
+        for payload in [
+            r#"{"type":"add","button":{"id":"new","name":"New inbox","action":{"type":"webmail","browser":"firefox","url":"https://example.com/mail"}}}"#,
+            r#"{"type":"update","button":{"id":"new","name":"Updated inbox","action":{"type":"webmail","browser":"edge","url":"https://example.com/updated"}}}"#,
+            r#"{"type":"move","id":"new","direction":"up"}"#,
+            r#"{"type":"move","id":"new","direction":"down"}"#,
+            r#"{"type":"delete","id":"new"}"#,
+        ] {
+            let change = serde_json::from_str(payload).unwrap();
+            change_settings_from(temp.path(), change).unwrap();
+        }
+        assert_same_settings(
+            &read_settings_from(temp.path()).unwrap(),
+            &customized_settings(),
         );
     }
     #[test]
