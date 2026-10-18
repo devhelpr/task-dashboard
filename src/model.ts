@@ -1,6 +1,7 @@
 export type Browser = "default" | "chrome" | "edge" | "firefox" | "safari";
-// A tagged action keeps future task types separate from webmail settings.
-export type Action = { type: "webmail"; browser: Browser; url: string };
+export type Action =
+  | { type: "webmail"; browser: Browser; url: string }
+  | { type: "executable"; path: string };
 export type TaskButton = { id: string; name: string; action: Action };
 export type Settings = { version: 1; buttons: TaskButton[] };
 export type SettingsChange =
@@ -41,8 +42,9 @@ export function applySettingsChange(
 }
 export const services = [
   { name: "Outlook · Work or school", url: "https://outlook.office.com/mail/" },
-  { name: "Hotmail · Personal Outlook", url: "https://outlook.live.com/mail/" },
+  { name: "Hotmail.com", url: "https://outlook.live.com/mail/" },
   { name: "Gmail", url: "https://mail.google.com/" },
+  { name: "Outlook.com", url: "https://outlook.com/" },
 ];
 export const browsers: { value: Browser; label: string }[] = [
   { value: "default", label: "System default" },
@@ -74,6 +76,21 @@ export const defaults: Settings = {
 export function validateButton(button: TaskButton): string | undefined {
   if (!button.name.trim() || Array.from(button.name).length > 80)
     return "Enter a name between 1 and 80 characters.";
+  if (button.action.type === "executable") {
+    const path = button.action.path;
+    if (
+      !path.trim() ||
+      path.length > 4096 ||
+      /[\x00-\x1f]/.test(path) ||
+      !(
+        path.startsWith("/") ||
+        /^[a-z]:[\\/]/i.test(path) ||
+        /^\\\\[^\\]+\\[^\\]+/.test(path)
+      )
+    )
+      return "Select an executable or enter its full path.";
+    return;
+  }
   try {
     const url = new URL(button.action.url);
     if (

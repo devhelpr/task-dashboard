@@ -483,3 +483,12 @@ input::placeholder {
     transform: none;
   }
 }
+
+.file-picker {
+  display: flex;
+  gap: 8px;
+}
+.file-picker input {
+  min-width: 0;
+  flex: 1;
+}

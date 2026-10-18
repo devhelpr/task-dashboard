@@ -20,6 +20,7 @@ tauri-build = { version = "2", features = [] }
 [dependencies]
 tauri = { version = "2", features = [] }
 open = "5"
+rfd = { version = "0.16", default-features = false }
 url = "2"
 tempfile = "3"
 serde = { version = "1", features = ["derive"] }

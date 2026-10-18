@@ -29,7 +29,13 @@ export async function getPlatform(): Promise<string> {
 export async function launchButton(id: string): Promise<void> {
   if (!desktop)
     throw new Error(
-      "Browser launching is available in the desktop app. Run npm run tauri dev.",
+      "Launching tasks is available in the desktop app. Run npm run tauri dev.",
     );
   return invoke("launch_button", { id });
+}
+
+export async function selectExecutable(): Promise<string | null> {
+  if (!desktop)
+    throw new Error("Selecting a file is available in the desktop app.");
+  return invoke("select_executable");
 }

@@ -16,6 +16,7 @@ enum Browser {
 #[serde(tag = "type", rename_all = "lowercase")]
 enum Action {
     Webmail { browser: Browser, url: String },
+    Executable { path: String },
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -122,7 +123,13 @@ fn validate(settings: &Settings) -> Result<(), String> {
         if button.name.trim().is_empty() || button.name.chars().count() > 80 {
             return Err("Use a button name between 1 and 80 characters.".into());
         }
-        let Action::Webmail { url, browser } = &button.action;
+        let (url, browser) = match &button.action {
+            Action::Webmail { url, browser } => (url, browser),
+            Action::Executable { path } => {
+                validate_executable_path(path)?;
+                continue;
+            }
+        };
         if url.len() > 2048 {
             return Err("The web address is too long.".into());
         }
@@ -138,6 +145,77 @@ fn validate(settings: &Settings) -> Result<(), String> {
             return Err("Safari is only supported on macOS.".into());
         }
     }
+    Ok(())
+}
+
+// Validate shape when saving; a temporarily missing program must not prevent
+// loading settings or editing unrelated shortcuts. Check availability on launch.
+fn validate_executable_path(path: &str) -> Result<(), String> {
+    if path.trim().is_empty()
+        || path.len() > 4096
+        || path.chars().any(char::is_control)
+        || !std::path::Path::new(path).is_absolute()
+    {
+        return Err("Select an executable or enter its full path.".into());
+    }
+    Ok(())
+}
+
+#[tauri::command]
+async fn select_executable() -> Result<Option<String>, String> {
+    let dialog = rfd::AsyncFileDialog::new().set_title("Select an executable");
+    #[cfg(target_os = "windows")]
+    let dialog = dialog.add_filter("Executable", &["exe"]);
+    dialog
+        .pick_file()
+        .await
+        .map(|file| {
+            file.path()
+                .to_str()
+                .map(str::to_owned)
+                .ok_or_else(|| "The selected path is not valid Unicode.".to_string())
+        })
+        .transpose()
+}
+
+fn executable_command(path: &str) -> Result<std::process::Command, String> {
+    validate_executable_path(path)?;
+    let selected = std::path::Path::new(path);
+    #[cfg(target_os = "macos")]
+    if selected.is_dir() && selected.extension().is_some_and(|ext| ext == "app") {
+        let mut command = std::process::Command::new("/usr/bin/open");
+        command.arg("-a").arg(selected);
+        return Ok(command);
+    }
+    if !selected.is_file() {
+        return Err("Could not find the executable. Select the program again in Settings.".into());
+    }
+    #[cfg(target_os = "windows")]
+    if !selected
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .is_some_and(|ext| ext.eq_ignore_ascii_case("exe"))
+    {
+        return Err("Select a Windows executable (.exe).".into());
+    }
+    // Pass the path directly, without shell interpretation or command arguments.
+    Ok(std::process::Command::new(selected))
+}
+
+fn launch_executable(path: &str) -> Result<(), String> {
+    let mut command = executable_command(path)?;
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+        command.creation_flags(0x08000000);
+    }
+    let mut child = command
+        .spawn()
+        .map_err(|e| format!("Could not start the executable: {e}"))?;
+    // Reap exited children without blocking the UI for the program's lifetime.
+    std::thread::spawn(move || {
+        let _ = child.wait();
+    });
     Ok(())
 }
 
@@ -311,8 +389,10 @@ fn launch_button(
         .iter()
         .find(|b| b.id == id)
         .ok_or("Button no longer exists.")?;
-    let Action::Webmail { browser, url } = &button.action;
-    launch(browser, url)
+    match &button.action {
+        Action::Webmail { browser, url } => launch(browser, url),
+        Action::Executable { path } => launch_executable(path),
+    }
 }
 
 pub fn run() {
@@ -322,6 +402,7 @@ pub fn run() {
             load_settings,
             change_settings,
             launch_button,
+            select_executable,
             platform
         ])
         .run(tauri::generate_context!())
@@ -331,6 +412,67 @@ pub fn run() {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn executable_settings_survive_save_reload_and_other_edits() {
+        let temp = tempfile::tempdir().unwrap();
+        // The target need not exist until the shortcut is launched.
+        let path = temp.path().join("Program Files").join("Mail app.exe");
+        let button = TaskButton {
+            id: "program".into(),
+            name: "Mail app".into(),
+            action: Action::Executable {
+                path: path.to_str().unwrap().into(),
+            },
+        };
+        let saved = change_settings_from(temp.path(), SettingsChange::Add { button }).unwrap();
+        let mut edited = saved.buttons[0].clone();
+        edited.name = "Renamed webmail".into();
+        let updated =
+            change_settings_from(temp.path(), SettingsChange::Update { button: edited }).unwrap();
+        assert_same_settings(&read_settings_from(temp.path()).unwrap(), &updated);
+        assert_eq!(
+            serde_json::to_value(&updated.buttons[3]).unwrap(),
+            serde_json::to_value(&saved.buttons[3]).unwrap()
+        );
+        assert!(executable_command(path.to_str().unwrap())
+            .unwrap_err()
+            .contains("Could not find"));
+    }
+
+    #[test]
+    fn executable_paths_are_literal_and_must_be_absolute() {
+        for path in [
+            "",
+            " ",
+            "mail.exe",
+            "https://example.com/mail.exe",
+            "/tmp/app\0.exe",
+            "/tmp/app\n.exe",
+        ] {
+            assert!(validate_executable_path(path).is_err(), "{path:?}");
+        }
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("Mail app ; echo injected.exe");
+        fs::write(&path, b"not a real executable").unwrap();
+        let command = executable_command(path.to_str().unwrap()).unwrap();
+        assert_eq!(command.get_program(), path.as_os_str());
+        assert_eq!(command.get_args().count(), 0);
+        assert!(executable_command(temp.path().to_str().unwrap()).is_err());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn launching_executable_starts_the_selected_program() {
+        use std::os::unix::fs::PermissionsExt;
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("Test program");
+        fs::write(&path, b"#!/bin/sh\nexit 0\n").unwrap();
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o700)).unwrap();
+        launch_executable(path.to_str().unwrap()).unwrap();
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o600)).unwrap();
+        assert!(launch_executable(path.to_str().unwrap()).is_err());
+    }
+
     #[test]
     fn default_and_empty_settings_are_valid() {
         assert!(validate(&Settings::default()).is_ok());

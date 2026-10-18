@@ -409,3 +409,131 @@ test("dashboard and editor layout, keyboard cancellation", async ({ page }) => {
     fullPage: true,
   });
 });
+
+test("personal webmail presets and executable shortcuts persist across edits", async ({
+  page,
+}) => {
+  await page.goto("/");
+  await page.getByRole("button", { name: "Settings", exact: true }).click();
+  await page.getByRole("button", { name: /Add button/ }).click();
+  await page.getByLabel("Button name").fill("Personal Outlook");
+  await page
+    .getByLabel("Email environment")
+    .selectOption({ label: "Outlook.com" });
+  await expect(page.getByLabel("Web address")).toHaveValue(
+    "https://outlook.com/",
+  );
+  await page
+    .getByLabel("Email environment")
+    .selectOption({ label: "Hotmail.com" });
+  await expect(page.getByLabel("Web address")).toHaveValue(
+    "https://outlook.live.com/mail/",
+  );
+  await page.getByRole("button", { name: "Save button", exact: true }).click();
+  await expect(page.getByRole("dialog")).not.toBeVisible();
+  await page
+    .getByRole("button", { name: "Edit Personal Outlook", exact: true })
+    .click();
+  await page.getByLabel("Action", { exact: true }).selectOption("executable");
+  await expect(page.getByLabel("Web address")).toHaveCount(0);
+  await expect(page.getByLabel("Open with")).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Browse…" })).toBeDisabled();
+  await page.getByLabel("Executable path").fill("relative.exe");
+  await page.getByRole("button", { name: "Save button", exact: true }).click();
+  await expect(page.getByRole("alert")).toContainText("full path");
+  const path = "C:\\Program Files\\Mail App\\mail.exe";
+  await page.getByLabel("Executable path").fill(path);
+  await page.getByRole("button", { name: "Save button", exact: true }).click();
+  await expect(page.getByRole("dialog")).not.toBeVisible();
+  const saved = await storedSettings(page);
+  expect(saved.buttons.slice(0, 3)).toEqual(defaults.buttons);
+  expect(saved.buttons[3].action).toEqual({ type: "executable", path });
+  await page.reload();
+  await expect(page.locator(".task").nth(3)).toContainText(path);
+  await page.locator(".task").nth(3).click();
+  await expect(page.getByRole("alert")).toContainText("desktop app");
+  await page.getByRole("button", { name: "Settings", exact: true }).click();
+  await page
+    .getByRole("button", { name: "Edit Personal Outlook", exact: true })
+    .click();
+  await expect(page.getByLabel("Action", { exact: true })).toHaveValue(
+    "executable",
+  );
+  await expect(page.getByLabel("Executable path")).toHaveValue(path);
+  await page.getByLabel("Action", { exact: true }).selectOption("webmail");
+  await page
+    .getByLabel("Email environment")
+    .selectOption({ label: "Outlook.com" });
+  await page.getByRole("button", { name: "Save button", exact: true }).click();
+  await expect(page.getByRole("dialog")).not.toBeVisible();
+  expect((await storedSettings(page)).buttons[3].action).toEqual({
+    type: "webmail",
+    browser: "default",
+    url: "https://outlook.com/",
+  });
+});
+
+test("desktop executable picker handles cancel and launches the saved shortcut by ID", async ({
+  page,
+}) => {
+  await page.addInitScript((initial) => {
+    const mock = window as unknown as {
+      isTauri: boolean;
+      __TAURI_INTERNALS__: {
+        invoke: (
+          command: string,
+          args?: { change?: SettingsChange; id?: string },
+        ) => Promise<unknown>;
+      };
+      launches: string[];
+    };
+    mock.isTauri = true;
+    mock.launches = [];
+    let settings = structuredClone(initial);
+    let picks = 0;
+    mock.__TAURI_INTERNALS__ = {
+      invoke: async (command, args) => {
+        if (command === "platform") return "windows";
+        if (command === "load_settings") return structuredClone(settings);
+        if (command === "select_executable")
+          return ++picks === 1 ? "C:\\Program Files\\Mail App\\mail.exe" : null;
+        if (command === "change_settings" && args?.change?.type === "update") {
+          const button = args.change.button;
+          settings.buttons = settings.buttons.map((current) =>
+            current.id === button.id ? button : current,
+          );
+          return structuredClone(settings);
+        }
+        if (command === "launch_button" && args?.id) {
+          mock.launches.push(args.id);
+          return;
+        }
+        throw new Error(`Unexpected command: ${command}`);
+      },
+    };
+  }, defaults);
+  await page.goto("/");
+  await page.getByRole("button", { name: "Settings", exact: true }).click();
+  await page
+    .getByRole("button", { name: "Edit Work email", exact: true })
+    .click();
+  await page.getByLabel("Action", { exact: true }).selectOption("executable");
+  await page.getByRole("button", { name: "Browse…" }).click();
+  await expect(page.getByLabel("Executable path")).toHaveValue(
+    "C:\\Program Files\\Mail App\\mail.exe",
+  );
+  await page.getByRole("button", { name: "Browse…" }).click();
+  await expect(page.getByLabel("Executable path")).toHaveValue(
+    "C:\\Program Files\\Mail App\\mail.exe",
+  );
+  await page.getByRole("button", { name: "Save button", exact: true }).click();
+  await expect(page.getByRole("dialog")).not.toBeVisible();
+  await page.getByRole("button", { name: "Dashboard", exact: true }).click();
+  await page.locator(".task").first().click();
+  await expect(page.locator(".notice")).toContainText("Opened Work email.");
+  expect(
+    await page.evaluate(
+      () => (window as unknown as { launches: string[] }).launches,
+    ),
+  ).toEqual(["outlook"]);
+});

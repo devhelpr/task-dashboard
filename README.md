@@ -1,6 +1,6 @@
 # Task Dashboard
 
-A Tauri v2 desktop app for macOS and Windows. A single column of large buttons opens webmail in the browser you choose. Settings lets you add, edit, delete, and reorder buttons. Includes Outlook (work/school), Hotmail (personal Outlook), Gmail, and custom HTTPS webmail addresses.
+A Tauri v2 desktop app for macOS and Windows. A single column of large buttons opens webmail in the browser you choose or starts a selected executable. Settings lets you add, edit, delete, and reorder buttons. Includes Outlook (work/school), Outlook.com, Hotmail.com, Gmail, and custom HTTPS webmail addresses.
 
 ## Develop
 
@@ -15,15 +15,15 @@ The app was bootstrapped with the official [Tauri v2 starter](https://v2.tauri.a
 
 `npm run test:e2e` runs UI and settings regression tests using installed Google Chrome and a dedicated test server on port 1438. These cover sequential edits, stale tabs, preserving other buttons' settings across saves and reloads, and delayed desktop startup loads with mocked Tauri commands. Rust tests exercise the actual settings files and change payloads.
 
-`npm run dev` provides a UI preview with separate browser-local settings. Browser launching requires the desktop app.
+`npm run dev` provides a UI preview with separate browser-local settings. Selecting and launching programs or browsers requires the desktop app.
 
 ## Use
 
-Click a dashboard button to open its webmail address. In **Settings**, choose **Add button**, set a clear name, select an email environment (or enter a custom HTTPS address), and choose a browser. Save the button. Edit and delete existing buttons, or use the arrows to reorder them. An empty dashboard is supported.
+Click a dashboard button to open its webmail address. In **Settings**, choose **Add button**, set a clear name, select an email environment (or enter a custom HTTPS address), and choose a browser. Alternatively, select **Executable** under **Action**, then use **Browse…** to select a program or enter its full path. Windows supports `.exe` files; macOS supports executable files and `.app` bundles. The program starts directly without URL arguments. Save the button. Edit and delete existing buttons, or use the arrows to reorder them. An empty dashboard is supported.
 
 Chrome, Edge, and Firefox must be installed; Safari is available on macOS. System default uses your OS browser preference. macOS locates named browsers through Launch Services; Windows uses registered App Paths for the current user and machine, including both registry views. Missing browsers produce an error. The app uses your existing browser session and never stores email credentials.
 
-Settings are written atomically to a stable per-user directory, separate from the installed application and Tauri’s bundle-ID app data: `~/Library/Application Support/com.hedwig.taskdashboard.settings/settings.json` on macOS, and `%APPDATA%\com.hedwig.taskdashboard.settings\settings.json` on Windows. Replacing the macOS app or reinstalling/upgrading the Windows app under the same OS user preserves these settings, including names, browser choices, URLs, and button order. The Windows uninstaller’s optional bundle-data cleanup does not target this directory. Failed saves leave the previous dashboard intact; unreadable or invalid settings report an error instead of overwriting the file. No cloud account is required.
+Settings are written atomically to a stable per-user directory, separate from the installed application and Tauri’s bundle-ID app data: `~/Library/Application Support/com.hedwig.taskdashboard.settings/settings.json` on macOS, and `%APPDATA%\com.hedwig.taskdashboard.settings\settings.json` on Windows. Replacing the macOS app or reinstalling/upgrading the Windows app under the same OS user preserves these settings, including names, browser choices, URLs, executable paths, and button order. The Windows uninstaller’s optional bundle-data cleanup does not target this directory. Failed saves leave the previous dashboard intact; unreadable or invalid settings report an error instead of overwriting the file. No cloud account is required.
 
 Each settings action applies to the latest saved list by button ID. Editing one button preserves the other buttons' names, destinations, browsers, and order, even when the editor's window has an older copy of the list. Saving an editor for a button that has since been deleted reports an error instead of restoring it.
 
@@ -31,7 +31,7 @@ On first launch after upgrading from the initial version, existing `com.hedwig.t
 
 The settings directory name is a persistence contract: do not change it with a version, product name, or bundle identifier update. Future settings schema changes must migrate older versions; unsupported or corrupt files currently produce an error and are left intact. Installers must never package or remove the persistent directory. To deliberately reset settings, quit the app and remove both the persistent and legacy settings files (otherwise legacy settings will migrate again).
 
-Actions use a tagged `type` field, currently `webmail`, so future actions can add independent configuration and launch logic. See `src/model.ts` and `src-tauri/src/lib.rs`.
+Actions use a tagged `type` field: `webmail` stores a browser and URL, while `executable` stores an absolute program path. Existing webmail settings remain compatible. A program that is moved or removed reports an error on launch; it does not prevent loading settings. See `src/model.ts` and `src-tauri/src/lib.rs`.
 
 ## Verify and build
 

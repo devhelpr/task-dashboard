@@ -5,11 +5,13 @@ import {
   launchButton,
   loadSettings,
   changeSettings,
+  selectExecutable,
 } from "./api";
 import {
   browsers,
   services,
   validateButton,
+  type Action,
   type Browser,
   type Settings,
   type SettingsChange,
@@ -44,6 +46,7 @@ function App() {
   const [busy, setBusy] = useState(false);
   const [launching, setLaunching] = useState<string | null>(null);
   const [formError, setFormError] = useState("");
+  const [selecting, setSelecting] = useState(false);
   const editor = useRef<HTMLDialogElement>(null);
   const deleteDialog = useRef<HTMLDialogElement>(null);
   const nameInput = useRef<HTMLInputElement>(null);
@@ -109,10 +112,13 @@ function App() {
   async function submit(event: React.FormEvent) {
     event.preventDefault();
     if (!editing || !settings) return;
-    const button = {
+    const button: TaskButton = {
       ...editing,
       name: editing.name.trim(),
-      action: { ...editing.action, url: editing.action.url.trim() },
+      action:
+        editing.action.type === "webmail"
+          ? { ...editing.action, url: editing.action.url.trim() }
+          : { ...editing.action, path: editing.action.path.trim() },
     };
     const message = validateButton(button);
     if (message) {
@@ -123,6 +129,25 @@ function App() {
     if (await persist({ type: exists ? "update" : "add", button })) {
       setEditing(null);
       setNotice(exists ? "Button updated." : "Button added.");
+    }
+  }
+  async function browseExecutable() {
+    if (!editing) return;
+    const id = editing.id;
+    setSelecting(true);
+    setFormError("");
+    try {
+      const path = await selectExecutable();
+      if (path)
+        setEditing((current) =>
+          current?.id === id && current.action.type === "executable"
+            ? { ...current, action: { type: "executable", path } }
+            : current,
+        );
+    } catch (e) {
+      setFormError(String(e));
+    } finally {
+      setSelecting(false);
     }
   }
   async function remove() {
@@ -155,8 +180,13 @@ function App() {
       setLaunching(null);
     }
   }
+  const webmail = editing?.action.type === "webmail" ? editing.action : null;
   const browserLabel = (browser: Browser) =>
     browsers.find((b) => b.value === browser)?.label;
+  const actionDescription = (action: Action) =>
+    action.type === "webmail"
+      ? `${new URL(action.url).hostname} · ${browserLabel(action.browser)}`
+      : `Executable · ${action.path}`;
   return (
     <div className="app-shell">
       <header className="app-header">
@@ -216,7 +246,7 @@ function App() {
             <p className="subtitle">
               {view === "dashboard"
                 ? "Choose a task. We’ll take you straight there."
-                : "Give every shortcut a name, a destination, and a browser."}
+                : "Choose webmail or a program for each shortcut."}
             </p>
           </div>
           {view === "settings" && (
@@ -264,11 +294,7 @@ function App() {
                 </span>
                 <span className="task-copy">
                   <strong>{button.name}</strong>
-                  <span>
-                    {new URL(button.action.url).hostname}{" "}
-                    <span className="dot">·</span>{" "}
-                    {browserLabel(button.action.browser)}
-                  </span>
+                  <span>{actionDescription(button.action)}</span>
                 </span>
                 <span className="task-arrow" aria-hidden="true">
                   {launching === button.id ? "…" : "↗"}
@@ -290,11 +316,7 @@ function App() {
                 </span>
                 <div className="row-copy">
                   <h2>{button.name}</h2>
-                  <p>
-                    {browserLabel(button.action.browser)}{" "}
-                    <span className="dot">·</span>{" "}
-                    {new URL(button.action.url).hostname}
-                  </p>
+                  <p>{actionDescription(button.action)}</p>
                 </div>
                 <div className="row-actions">
                   <button
@@ -341,7 +363,7 @@ function App() {
               <MailIcon />
             </span>
             <h2>A fresh start.</h2>
-            <p>Add your first button to put your email one click away.</p>
+            <p>Add your first button to put your tasks one click away.</p>
             <button className="primary" onClick={() => edit()}>
               ＋ Add a button
             </button>
@@ -369,7 +391,7 @@ function App() {
           <form onSubmit={submit}>
             <div className="dialog-heading">
               <div>
-                <p className="eyebrow">WEBMAIL SHORTCUT</p>
+                <p className="eyebrow">TASK SHORTCUT</p>
                 <h2 id="editor-title">
                   {settings?.buttons.some((b) => b.id === editing.id)
                     ? "Edit button"
@@ -395,73 +417,146 @@ function App() {
               required
               onChange={(e) => setEditing({ ...editing, name: e.target.value })}
             />
-            <label htmlFor="service">Email environment</label>
+            <label htmlFor="action-type">Action</label>
             <select
-              id="service"
-              value={
-                services.some((s) => s.url === editing.action.url)
-                  ? editing.action.url
-                  : "custom"
-              }
-              onChange={(e) =>
+              id="action-type"
+              value={editing.action.type}
+              disabled={selecting}
+              onChange={(e) => {
+                setFormError("");
                 setEditing({
                   ...editing,
-                  action: {
-                    ...editing.action,
-                    url: e.target.value === "custom" ? "" : e.target.value,
-                  },
-                })
-              }
+                  action:
+                    e.target.value === "executable"
+                      ? { type: "executable", path: "" }
+                      : {
+                          type: "webmail",
+                          browser: "default",
+                          url: services[0].url,
+                        },
+                });
+              }}
             >
-              {services.map((s) => (
-                <option key={s.url} value={s.url}>
-                  {s.name}
-                </option>
-              ))}
-              <option value="custom">Custom webmail address</option>
+              <option value="webmail">Webmail</option>
+              <option value="executable">Executable</option>
             </select>
-            <label htmlFor="url">Web address</label>
-            <input
-              id="url"
-              type="url"
-              required
-              value={editing.action.url}
-              placeholder="https://mail.example.com"
-              onChange={(e) =>
-                setEditing({
-                  ...editing,
-                  action: { ...editing.action, url: e.target.value },
-                })
-              }
-            />
-            <p className="field-hint">
-              Use an HTTPS address. Sign in securely in your browser.
-            </p>
-            <label htmlFor="browser">Open with</label>
-            <select
-              id="browser"
-              value={editing.action.browser}
-              onChange={(e) =>
-                setEditing({
-                  ...editing,
-                  action: {
-                    ...editing.action,
-                    browser: e.target.value as Browser,
-                  },
-                })
-              }
-            >
-              {browsers
-                .filter((b) => b.value !== "safari" || platform === "macos")
-                .map((b) => (
-                  <option key={b.value} value={b.value}>
-                    {b.label}
-                  </option>
-                ))}
-            </select>
-            <p className="field-hint">
-              The selected browser must be installed on this computer.
-            </p>
+            {webmail ? (
+              <>
+                <label htmlFor="service">Email environment</label>
+                <select
+                  id="service"
+                  value={
+                    services.some((s) => s.url === webmail.url)
+                      ? webmail.url
+                      : "custom"
+                  }
+                  onChange={(e) =>
+                    setEditing({
+                      ...editing,
+                      action: {
+                        ...webmail,
+                        type: "webmail",
+                        url: e.target.value === "custom" ? "" : e.target.value,
+                      },
+                    })
+                  }
+                >
+                  {services.map((s) => (
+                    <option key={s.url} value={s.url}>
+                      {s.name}
+                    </option>
+                  ))}
+                  <option value="custom">Custom webmail address</option>
+                </select>
+                <label htmlFor="url">Web address</label>
+                <input
+                  id="url"
+                  type="url"
+                  required
+                  value={webmail.url}
+                  placeholder="https://mail.example.com"
+                  onChange={(e) =>
+                    setEditing({
+                      ...editing,
+                      action: {
+                        ...webmail,
+                        type: "webmail",
+                        url: e.target.value,
+                      },
+                    })
+                  }
+                />
+                <p className="field-hint">
+                  Use an HTTPS address. Sign in securely in your browser.
+                </p>
+                <label htmlFor="browser">Open with</label>
+                <select
+                  id="browser"
+                  value={webmail.browser}
+                  onChange={(e) =>
+                    setEditing({
+                      ...editing,
+                      action: {
+                        ...webmail,
+                        type: "webmail",
+                        browser: e.target.value as Browser,
+                      },
+                    })
+                  }
+                >
+                  {browsers
+                    .filter((b) => b.value !== "safari" || platform === "macos")
+                    .map((b) => (
+                      <option key={b.value} value={b.value}>
+                        {b.label}
+                      </option>
+                    ))}
+                </select>
+                <p className="field-hint">
+                  The selected browser must be installed on this computer.
+                </p>
+              </>
+            ) : (
+              <>
+                <label htmlFor="executable-path">Executable path</label>
+                <div className="file-picker">
+                  <input
+                    id="executable-path"
+                    required
+                    value={
+                      editing.action.type === "executable"
+                        ? editing.action.path
+                        : ""
+                    }
+                    placeholder={
+                      platform === "windows"
+                        ? "C:\\Program Files\\My App\\app.exe"
+                        : "/path/to/program"
+                    }
+                    onChange={(e) =>
+                      setEditing({
+                        ...editing,
+                        action: { type: "executable", path: e.target.value },
+                      })
+                    }
+                  />
+                  <button
+                    type="button"
+                    className="secondary"
+                    disabled={selecting || !desktop}
+                    onClick={browseExecutable}
+                  >
+                    {selecting ? "Selecting…" : "Browse…"}
+                  </button>
+                </div>
+                <p className="field-hint">
+                  Choose a program to start directly.{" "}
+                  {desktop
+                    ? ""
+                    : "File selection and launching are available in the desktop app."}
+                </p>
+              </>
+            )}
             {(formError || error) && (
               <p className="error" role="alert">
                 {formError || error}
@@ -476,7 +571,7 @@ function App() {
               >
                 Cancel
               </button>
-              <button className="primary" disabled={busy}>
+              <button className="primary" disabled={busy || selecting}>
                 {busy ? "Saving…" : "Save button"}
               </button>
             </div>
