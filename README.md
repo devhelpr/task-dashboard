@@ -2,6 +2,12 @@
 
 A Tauri v2 desktop app for macOS and Windows. A single column of large buttons opens webmail in the browser you choose or starts a selected executable. Settings lets you add, edit, delete, and reorder buttons. Includes Outlook (work/school), Outlook.com, Hotmail.com, Gmail, and custom HTTPS webmail addresses.
 
+## New in 0.2.0
+
+- Separate Outlook.com and Hotmail.com webmail choices alongside Outlook for work or school.
+- Executable shortcuts: select a local program with **Browse…** or enter its full path, then start it directly from the dashboard.
+- Existing webmail shortcuts and saved settings remain compatible.
+
 ## Develop
 
 Install Node.js 24+ and Rust stable, plus the [Tauri platform prerequisites](https://v2.tauri.app/start/prerequisites/) (Xcode Command Line Tools on macOS; Microsoft C++ Build Tools and WebView2 on Windows).
@@ -53,7 +59,7 @@ The [release workflow](.github/workflows/release.yml) follows [Tauri's GitHub Ac
 
 Run these commands from the project root on the branch you want to release. Make sure `origin` points to your GitHub repository and commit the app changes you want included in the release first.
 
-For example, to release **0.1.1**, set `version` to `0.1.1` in `package.json`, `src-tauri/Cargo.toml` (the `[package]` version), and `src-tauri/tauri.conf.json`. Use the same version in all three files and in the tag below. Then refresh the lockfiles and verify the build:
+For example, to release **0.2.0**, set `version` to `0.2.0` in `package.json`, `src-tauri/Cargo.toml` (the `[package]` version), and `src-tauri/tauri.conf.json`. Use the same version in all three files and in the tag below. Then refresh the lockfiles and verify the build:
 
 ```sh
 npm install --package-lock-only --ignore-scripts
@@ -66,13 +72,13 @@ Commit the version changes, create an annotated tag on that commit, and push bot
 
 ```sh
 git add package.json package-lock.json src-tauri/Cargo.toml src-tauri/Cargo.lock src-tauri/tauri.conf.json
-git commit -m "Release v0.1.1"
-git tag -a v0.1.1 -m "Task Dashboard v0.1.1"
+git commit -m "Release v0.2.0"
+git tag -a v0.2.0 -m "Task Dashboard v0.2.0"
 git push origin HEAD
-git push origin v0.1.1
+git push origin v0.2.0
 ```
 
-**Pushing the tag triggers the release workflow.** Creating a local tag or pushing only the branch does not trigger it. The workflow matches tags starting with `v`; use a new tag for each release, such as `v0.1.2` for the next version.
+**Pushing the tag triggers the release workflow.** Creating a local tag or pushing only the branch does not trigger it. The workflow matches tags starting with `v`; use a new tag for each release, such as `v0.2.1` for the next version.
 
 In GitHub, open **Actions → Desktop installers** to follow the build. Actions builds an Apple Silicon macOS `.dmg` and Windows x64 `.exe` (NSIS) / `.msi` installers, attaching them to a **draft GitHub release**. When both build jobs succeed, open **Releases**, review the draft and its installers, and choose **Publish release** to make it available for download.
 
